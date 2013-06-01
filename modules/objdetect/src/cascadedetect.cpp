@@ -224,7 +224,7 @@ void groupRectangles(std::vector<Rect>& rectList, int groupThreshold, double eps
         //  rejectLevels[i] is the latest stage at which we have rejected this
         //  rectangle (or the total number of stages if we accepted the point)
         //  
-        int n1 = levelWeights ? rejectLevels[i] : rweights[i];
+        int n1 = rweights[i];
 
         // w1 maximum confidence of a rectangle in this class
         double w1 = rejectWeights[i];
