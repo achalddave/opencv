@@ -411,6 +411,7 @@ inline int predictOrderedStump( CascadeClassifier& cascade, Ptr<FeatureEvaluator
     CascadeClassifier::Data::Stage* cascadeStages = &cascade.data.stages[0];
 
     int nstages = (int)cascade.data.stages.size();
+    // go through all the stages
     for( int stageIdx = 0; stageIdx < nstages; stageIdx++ )
     {
         CascadeClassifier::Data::Stage& stage = cascadeStages[stageIdx];
@@ -420,9 +421,12 @@ inline int predictOrderedStump( CascadeClassifier& cascade, Ptr<FeatureEvaluator
         for( int i = 0; i < ntrees; i++, nodeOfs++, leafOfs+= 2 )
         {
             CascadeClassifier::Data::DTreeNode& node = cascadeNodes[nodeOfs];
+            // featureEvaluator(idx) -> featuresPtr[featureIdx].calc(offset) * varianceNormFactor
+            // value is some level of confidence for a particular stage
             double value = featureEvaluator(node.featureIdx);
             sum += cascadeLeaves[ value < node.threshold ? leafOfs : leafOfs + 1 ];
         }
+        // sum is some level of confidence for the set window, across all the stages
 
         if( sum < stage.threshold )
             return -stageIdx;

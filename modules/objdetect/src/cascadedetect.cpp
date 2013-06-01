@@ -131,6 +131,8 @@ public:
 };
 
 
+// weights = rejectLevels (stage where rejected, or final stage)
+// levelWeights = some measure of confidence for each pixel over all the stages
 void groupRectangles(std::vector<Rect>& rectList, int groupThreshold, double eps, std::vector<int>* weights, std::vector<double>* levelWeights)
 {
     if( groupThreshold <= 0 || rectList.empty() )
@@ -147,31 +149,50 @@ void groupRectangles(std::vector<Rect>& rectList, int groupThreshold, double eps
 
     std::vector<int> labels;
     int nclasses = partition(rectList, labels, SimilarRects(eps));
+    // rectangles that are very close to each other will get the same label/cls
+    // nclasses = number of classes (number of rects after they're grouped
+    //            together
 
     std::vector<Rect> rrects(nclasses);
     std::vector<int> rweights(nclasses, 0);
     std::vector<int> rejectLevels(nclasses, 0);
     std::vector<double> rejectWeights(nclasses, DBL_MIN);
+
+    // nlabels = number of original rectangles (rectList.size())
     int i, j, nlabels = (int)labels.size();
     for( i = 0; i < nlabels; i++ )
     {
         int cls = labels[i];
+        // we add all the x,y,width,height,etc. up first, to average
+        // them later
         rrects[cls].x += rectList[i].x;
         rrects[cls].y += rectList[i].y;
         rrects[cls].width += rectList[i].width;
         rrects[cls].height += rectList[i].height;
+        
+        // rweights has the number of occurrences for each class
         rweights[cls]++;
     }
+    // weights = rejectLevels (0 indexed stage id until window was rejected, or
+    //      numStages if window passed all stages)
+    // levelWeights = some measure of confidence for each pixel over all the stages
+    //   (ONLY IF outputRejectLevels was true in detectMultiScale)
     if ( levelWeights && weights && !weights->empty() && !levelWeights->empty() )
     {
+        // for each of the original rectangles
         for( i = 0; i < nlabels; i++ )
         {
+            // class of current rectangle
             int cls = labels[i];
+            // rejectLevels contains the latest stage at which a rectangle of the
+            // specific class was rejected
             if( (*weights)[i] > rejectLevels[cls] )
             {
                 rejectLevels[cls] = (*weights)[i];
                 rejectWeights[cls] = (*levelWeights)[i];
             }
+            // rejectWeights contains the maximum confidence for a given
+            // rectangle
             else if( ( (*weights)[i] == rejectLevels[cls] ) && ( (*levelWeights)[i] > rejectWeights[cls] ) )
                 rejectWeights[cls] = (*levelWeights)[i];
         }
@@ -179,6 +200,8 @@ void groupRectangles(std::vector<Rect>& rectList, int groupThreshold, double eps
 
     for( i = 0; i < nclasses; i++ )
     {
+        // divide dimensions of class rectangles by the number of rectangles in
+        // a class (since we summed dimensions before)
         Rect r = rrects[i];
         float s = 1.f/rweights[i];
         rrects[i] = Rect(saturate_cast<int>(r.x*s),
@@ -196,7 +219,14 @@ void groupRectangles(std::vector<Rect>& rectList, int groupThreshold, double eps
     for( i = 0; i < nclasses; i++ )
     {
         Rect r1 = rrects[i];
+        // n1 seemst to be a confidence measure, but it seems to be confused:
+        //  rweights is the number of similar rectangles, while
+        //  rejectLevels[i] is the latest stage at which we have rejected this
+        //  rectangle (or the total number of stages if we accepted the point)
+        //  
         int n1 = levelWeights ? rejectLevels[i] : rweights[i];
+
+        // w1 maximum confidence of a rectangle in this class
         double w1 = rejectWeights[i];
         if( n1 <= groupThreshold )
             continue;
@@ -213,16 +243,21 @@ void groupRectangles(std::vector<Rect>& rectList, int groupThreshold, double eps
             int dy = saturate_cast<int>( r2.height * eps );
 
             if( i != j &&
+                // the next 4 checks test if r1 is contained within r2
                 r1.x >= r2.x - dx &&
                 r1.y >= r2.y - dy &&
                 r1.x + r1.width <= r2.x + r2.width + dx &&
-                r1.y + r1.height <= r2.y + r2.height + dy &&
-                (n2 > std::max(3, n1) || n1 < 3) )
+                r1.y + r1.height <= r2.y + r2.height + dy && 
+                (n2 > std::max(3, n1) || n1 < 3) ) // and if r2 has at least 3 neighbors but r1 has less than 3 neighbors
+            {                                      // why 3? shouldn't this be groupThreshold?
+                // if r1 is in r2, then we won't add r1; just continue; we'll get to r2 eventually
                 break;
+            }
         }
 
         if( j == nclasses )
         {
+            // if r1 is not in any other rectangle, we'll reach here
             rectList.push_back(r1);
             if( weights )
                 weights->push_back(n1);
@@ -497,6 +532,7 @@ bool HaarEvaluator::read(const FileNode& node)
 
     for(int i = 0; it != it_end; ++it, i++)
     {
+        // if you can't read a feature, we can't do much; return out
         if(!featuresPtr[i].read(*it))
             return false;
         if( featuresPtr[i].tilted )
@@ -547,7 +583,7 @@ bool HaarEvaluator::setImage( const Mat &image, Size _origWinSize )
         integral(image, sum, sqsum, tilted);
     }
     else
-        integral(image, sum, sqsum);
+        integral(image, sum, sqsum); // create an integral image
     const int* sdata = (const int*)sum.data;
     const double* sqdata = (const double*)sqsum.data;
     size_t sumStep = sum.step/sizeof(sdata[0]);
@@ -877,12 +913,15 @@ bool CascadeClassifier::load(const String& filename)
     if( !fs.isOpened() )
         return false;
 
+    // first, read and see if it's a new format classifier file
     if( read(fs.getFirstTopLevelNode()) )
         return true;
 
     fs.release();
 
+    // if not, check if it's an old type
     oldCascade = Ptr<CvHaarClassifierCascade>((CvHaarClassifierCascade*)cvLoad(filename.c_str(), 0, 0, 0));
+    // if it's neither, then return false; we can't load the cascade
     return !oldCascade.empty();
 }
 
@@ -896,7 +935,10 @@ int CascadeClassifier::runAt( Ptr<FeatureEvaluator>& evaluator, Point pt, double
 
     if( !evaluator->setWindow(pt) )
         return -1;
-    if( data.isStumpBased )
+
+    // predictOrderedStump and predictOrdered both put some measure of confidence
+    // in the last argument
+    if( data.isStumpBased ) // no idea what stump based data is :(
     {
         if( data.featureType == FeatureEvaluator::HAAR )
             return predictOrderedStump<HaarEvaluator>( *this, evaluator, weight );
@@ -955,6 +997,8 @@ public:
         yStep = _yStep;
         scalingFactor = _factor;
         rectangles = &_vec;
+        // if we don't need to output the weights/levels, we don't need
+        // levels/weights vectors
         rejectLevels = outputLevels ? &_levels : 0;
         levelWeights = outputLevels ? &_weights : 0;
         mask = _mask;
@@ -963,6 +1007,7 @@ public:
 
     void operator()(const Range& range) const
     {
+        // get a feature evaluator
         Ptr<FeatureEvaluator> evaluator = classifier->featureEvaluator->clone();
 
         Size winSize(cvRound(classifier->data.origWinSize.width * scalingFactor), cvRound(classifier->data.origWinSize.height * scalingFactor));
@@ -978,6 +1023,19 @@ public:
                 }
 
                 double gypWeight;
+                /*
+                   the following line check confidence across all the stages at
+                   a particular point
+
+                   - `gypWeight` is confidence across all the stages for this
+                       point 
+                   - `result` is the result of checking gypWeight against
+                       some threshold
+
+                   if we passed/accepted this pixel, then `result` is 1.
+                   Otherwise, `result` is the negative of index of the stage at
+                   which we rejected it.
+                */
                 int result = classifier->runAt(evaluator, Point(x, y), gypWeight);
 
 #if defined (LOG_CASCADE_STATISTIC)
@@ -986,13 +1044,25 @@ public:
 #endif
                 if( rejectLevels )
                 {
+                    /* 
+                     * lol hack; result has either negative stage index of
+                     * rejection or 1; if it's 1, we set it to negative of the
+                     * number of stages 
+                     */
                     if( result == 1 )
                         result =  -(int)classifier->data.stages.size();
+                    // if we got past the first (numStages - 4) stages, then we
+                    // can count it as a hit and add the rectangle
+                    //          side: why 4? no idea
                     if( classifier->data.stages.size() + result < 4 )
                     {
                         mtx->lock();
                         rectangles->push_back(Rect(cvRound(x*scalingFactor), cvRound(y*scalingFactor), winSize.width, winSize.height));
+                        // rejectLevels has the number of stages this rectangle went through before
+                        // being rejected (0 indexed, for some reason); or if it passed them all, it's the number of stages in total
                         rejectLevels->push_back(-result);
+
+                        // levelWeights has the level of confidence for this specific window
                         levelWeights->push_back(gypWeight);
                         mtx->unlock();
                     }
@@ -1040,12 +1110,27 @@ bool CascadeClassifier::detectSingleScale( const Mat& image, int stripCount, Siz
         currentMask=maskGenerator->generateMask(image);
     }
 
+    // possible objects
     std::vector<Rect> candidatesVector;
+
     std::vector<int> rejectLevels;
     std::vector<double> levelWeights;
     Mutex mtx;
+    // get the actual possible objects (CascadeClassifierInvoker)
     if( outputRejectLevels )
     {
+        /*
+           CascadeClassifierInvoker( CascadeClassifier& _cc, Size _sz1, int _stripSize, int _yStep, double _factor,
+           vector<Rect>& _vec, vector<int>& _levels, vector<double>& _weights, bool outputLevels, const Mat& _mask, Mutex* _mtx)
+        */
+        /* 
+         * `rejectLevels` will get stage where each window was rejected, or 
+         * numStages if it was accepted
+         *
+         * `levelWeights` will get the confidence for each window
+         *
+         */
+        
         parallel_for_(Range(0, stripCount), CascadeClassifierInvoker( *this, processingRectSize, stripSize, yStep, factor,
             candidatesVector, rejectLevels, levelWeights, true, currentMask, &mtx));
         levels.insert( levels.end(), rejectLevels.begin(), rejectLevels.end() );
@@ -1132,8 +1217,10 @@ void CascadeClassifier::detectMultiScale( const Mat& image, std::vector<Rect>& o
     }
 
     Mat imageBuffer(image.rows + 1, image.cols + 1, CV_8U);
+    // possible objects
     std::vector<Rect> candidates;
 
+    // try windows of various sizes
     for( double factor = 1; ; factor *= scaleFactor )
     {
         Size originalWindowSize = getOriginalWindowSize();
@@ -1148,6 +1235,7 @@ void CascadeClassifier::detectMultiScale( const Mat& image, std::vector<Rect>& o
             break;
         if( windowSize.width < minObjectSize.width || windowSize.height < minObjectSize.height )
             continue;
+
 
         Mat scaledImage( scaledImageSize, CV_8U, imageBuffer.data );
         resize( grayImage, scaledImage, scaledImageSize, 0, 0, INTER_LINEAR );
@@ -1174,6 +1262,9 @@ void CascadeClassifier::detectMultiScale( const Mat& image, std::vector<Rect>& o
         stripSize = processingRectSize.height;
     #endif
 
+        // check for this particular scale
+        // levelWeights is a measure of confidence from the last stage; 
+        // rejectLevels is stage at which a pixel was rejected
         if( !detectSingleScale( scaledImage, stripCount, processingRectSize, stripSize, yStep, factor, candidates,
             rejectLevels, levelWeights, outputRejectLevels ) )
             break;
@@ -1237,7 +1328,8 @@ bool CascadeClassifier::Data::read(const FileNode &root)
         return false;
 
     ncategories = fn[CC_MAX_CAT_COUNT];
-    int subsetSize = (ncategories + 31)/32,
+    int subsetSize = (ncategories + 31)/32, // rounding? round up to next
+                                            // multiple of 32, then divide by 32
         nodeStep = 3 + ( ncategories>0 ? subsetSize : 1 );
 
     // load stages
@@ -1251,11 +1343,18 @@ bool CascadeClassifier::Data::read(const FileNode &root)
 
     FileNodeIterator it = fn.begin(), it_end = fn.end();
 
+    // loop over the stages
     for( int si = 0; it != it_end; si++, ++it )
     {
+        // current stage data
         FileNode fns = *it;
+
         Stage stage;
+
+        // why subtract such a tiny epsilon? i do not know
         stage.threshold = (float)fns[CC_STAGE_THRESHOLD] - THRESHOLD_EPS;
+
+        // weak classifiers
         fns = fns[CC_WEAK_CLASSIFIERS];
         if(fns.empty())
             return false;
@@ -1264,12 +1363,18 @@ bool CascadeClassifier::Data::read(const FileNode &root)
         stages.push_back(stage);
         classifiers.reserve(stages[si].first + stages[si].ntrees);
 
+        // loop over the weak classifiers
         FileNodeIterator it1 = fns.begin(), it1_end = fns.end();
         for( ; it1 != it1_end; ++it1 ) // weak trees
         {
             FileNode fnw = *it1;
+
+            // 4 floating point values
             FileNode internalNodes = fnw[CC_INTERNAL_NODES];
+
+            // 2 floating point values
             FileNode leafValues = fnw[CC_LEAF_VALUES];
+
             if( internalNodes.empty() || leafValues.empty() )
                 return false;
 
