@@ -1051,10 +1051,7 @@ public:
                      */
                     if( result == 1 )
                         result =  -(int)classifier->data.stages.size();
-                    // if we got past the first (numStages - 4) stages, then we
-                    // can count it as a hit and add the rectangle
-                    //          side: why 4? no idea
-                    if( classifier->data.stages.size() + result < 4 )
+                    if( classifier->data.stages.size() + result == 0 )
                     {
                         mtx->lock();
                         rectangles->push_back(Rect(cvRound(x*scalingFactor), cvRound(y*scalingFactor), winSize.width, winSize.height));
