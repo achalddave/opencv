@@ -430,7 +430,8 @@ inline int predictOrderedStump( CascadeClassifier& cascade, Ptr<FeatureEvaluator
         }
         // stageSum is some level of confidence for the set window, across all the stages
 
-        sum += stageSum - stage.threshold;
+        // sum += stageSum - stage.threshold;
+        sum = stageSum;
         if( stageSum < stage.threshold )
             return -stageIdx;
     }
