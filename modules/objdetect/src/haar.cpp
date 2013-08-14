@@ -1192,6 +1192,7 @@ cvRunHaarClassifierCascadeSum( const CvHaarClassifierCascade* _cascade,
                     }
                 }
                 __m128d i_threshold = _mm_set1_pd(cascade->stage_classifier[i].threshold);
+                _mm_store_sd(&stage_sum, vstage_sum);
                 if( _mm_comilt_sd(vstage_sum, i_threshold) )
                     return -i;
             }
